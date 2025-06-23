@@ -5,16 +5,16 @@ GO
 SET QUOTED_IDENTIFIER ON
 GO
 
-CREATE VIEW [Mart_Load_UWHealth].[VIZIENT_PROC_ANALYTICS_SPL_UW]
-AS SELECT
+--CREATE VIEW [Mart_Load_UWHealth].[VIZIENT_PROC_ANALYTICS_SPL_UW] AS 
+SELECT
 /*
 11-25-24 Matt Rock - corrected supot and supot2 to find correct pricing, 
 removed imp2 for wasted / implanted and removed implants as that table does not log unimplanted implants well
 */
 '520098' AS "Medicare Provider ID"
-, COALESCE(CAST(har.LOC_ID as varchar(18)), '') AS "Sub-Facility ID"
+, COALESCE(CAST(orlog.LOC_ID as varchar(18)), '') AS "Sub-Facility ID"
 , '40357' AS "Member ID"
-, COALESCE(CAST(har.HSP_ACCOUNT_ID as varchar(18)), '') as "Encounter ID"
+, COALESCE(CAST(coalesce(peh.HSP_ACCOUNT_ID, PAT_OR_ADM_LINK.or_link_csn)  as varchar(18)), '') as "Encounter ID" 
 , COALESCE(CAST(id.IDENTITY_ID as varchar(25)), '') as "Patient ID"
 , COALESCE(orlog.CASE_ID, '') AS "Procedural Case Number"
 , COALESCE(CONVERT(nchar(8),orlog.SURGERY_DATE,112),'') AS "Date of Service"  /*The value of 112 is used to format the result as yyyymmdd. */
@@ -66,7 +66,7 @@ FROM [source_uwhealth].epic_or_log_cur orlog
 INNER JOIN [source_uwhealth].epic_PAT_OR_ADM_LINK_cur PAT_OR_ADM_LINK ON orlog.CASE_ID = PAT_OR_ADM_LINK.CASE_ID
 INNER JOIN [source_uwhealth].epic_PAT_ENC_HSP_cur peh on PAT_OR_ADM_LINK.OR_LINK_CSN = peh.PAT_ENC_CSN_ID
 INNER JOIN [source_uwhealth].epic_patient_cur patient ON orlog.PAT_ID = patient.PAT_ID
-INNER JOIN [source_uwhealth].epic_hsp_account_cur har ON peh.HSP_ACCOUNT_ID = har.HSP_ACCOUNT_ID
+--INNER JOIN [source_uwhealth].epic_hsp_account_cur har ON peh.HSP_ACCOUNT_ID = har.HSP_ACCOUNT_ID
 INNER JOIN [source_uwhealth].epic_identity_ID_cur id ON patient.PAT_ID = id.PAT_ID
 LEFT OUTER JOIN [source_uwhealth].epic_or_log_LN_IMPLANT_cur olli ON orlog.LOG_ID = olli.LOG_ID
 
@@ -140,7 +140,7 @@ AND (oli_tray.IMPLANT_ID IS NOT NULL OR oli_tray2.IMPLANT_ID IS NOT NULL)
 AND (oli_tray.IMPLANT_NUM_USED > 0 OR oli_tray2.IMPLANT_NUM_USED > 0)
 AND (oli_tray.IMPLANT_ACTION_C <> '2' OR oli_tray2.IMPLANT_ACTION_C = '3') /*KCJ 11/13/18 excluding explants per Brenda Brookins */
 /* BEGIN Facility Selection--default is all */
-AND har.SERV_AREA_ID IN ('10000')
+--AND har.SERV_AREA_ID IN ('10000')
 AND orlog.LOC_ID NOT IN ('88600','99600')
 AND orlog.ROOM_ID NOT IN ('692742','692743','692744','692745','692746','692747','692748','692749','692875','692876','692877','693301','693326','695241','695382','695383') --APC rooms to be excluded because many noninvasive procedures and others that are causing data quality concerns
 AND orlog.ROOM_ID NOT IN ('693288','695076') /* RN Out rooms that are often non-invasive procedures */
@@ -172,9 +172,9 @@ UNION all
 
 SELECT DISTINCT
 '520098' AS "Medicare Provider ID"
-, COALESCE(CAST(har.LOC_ID as varchar(18)), '') AS "Sub-Facility ID"
+, COALESCE(CAST(orlog.LOC_ID as varchar(18)), '') AS "Sub-Facility ID"
 , '40357' AS "Member ID"
-,COALESCE(CAST(har.HSP_ACCOUNT_ID as varchar(18)), '') as "Encounter ID"
+,COALESCE(CAST(coalesce(peh.HSP_ACCOUNT_ID, PAT_OR_ADM_LINK.or_link_csn) as varchar(18)), '') as "Encounter ID"
 ,COALESCE(CAST(id.IDENTITY_ID as varchar(25)), '') as "Patient ID"
 , COALESCE(orlog.CASE_ID, '') AS "Procedural Case Number"
 , COALESCE(CONVERT(nchar(8),orlog.SURGERY_DATE,112),'') AS "Date of Service"  /*The value of 112 is used to format the result as yyyymmdd. */
@@ -238,7 +238,7 @@ FROM [source_uwhealth].epic_or_log_cur orlog
 INNER JOIN [source_uwhealth].epic_PAT_OR_ADM_LINK_cur PAT_OR_ADM_LINK ON orlog.CASE_ID = PAT_OR_ADM_LINK.CASE_ID
 INNER JOIN [source_uwhealth].epic_PAT_ENC_HSP_cur peh on PAT_OR_ADM_LINK.OR_LINK_CSN = peh.PAT_ENC_CSN_ID
 INNER JOIN [source_uwhealth].epic_patient_cur patient ON orlog.PAT_ID = patient.PAT_ID
-INNER JOIN [source_uwhealth].epic_hsp_account_cur har ON peh.HSP_ACCOUNT_ID = har.HSP_ACCOUNT_ID
+--INNER JOIN [source_uwhealth].epic_hsp_account_cur har ON peh.HSP_ACCOUNT_ID = har.HSP_ACCOUNT_ID
 INNER JOIN [source_uwhealth].epic_identity_id_cur id ON patient.PAT_ID = id.PAT_ID
 INNER JOIN [source_uwhealth].epic_v_log_supplies_implants_cur vlsi on orlog.LOG_ID = vlsi.LOG_ID AND vlsi.IMPLANT_ID IS NULL
 LEFT OUTER JOIN [source_uwhealth].epic_OR_SPLY_cur ors ON vlsi.ITEM_ID = ors.SUPPLY_ID
@@ -290,7 +290,7 @@ AND patient.PAT_MRN_ID NOT LIKE 'ZZ%'
 /* AND vlsi.ITEM_ID is not null -- BJ: attempt to filter out Equip, Instruments and RX items... not the right approach as these item types have MMIS Item #'s */
 
 /* BEGIN Facility Selection--default is all */
-AND har.SERV_AREA_ID IN ('10000')
+--AND har.SERV_AREA_ID IN ('10000')
 AND orlog.LOC_ID NOT IN ('88600','99600')
 AND orlog.ROOM_ID NOT IN ('692742','692743','692744','692745','692746','692747','692748','692749','692875','692876','692877','693301','693326','695241','695382','695383') --APC rooms to be excluded because many noninvasive procedures and others that are causing data quality concerns */
 AND orlog.ROOM_ID NOT IN ('693288','695076') -- RN Out rooms that are often non-invasive procedures */
@@ -309,7 +309,9 @@ AND zom_sply.NAME <> 'NONE NEEDED/KNOWN/WANTED'
 AND zos.NAME <> 'NONE NEEDED/KNOWN/WANTED'
 AND ("HCO Item Number" <> '' AND "Supply Cost" <> '0') */
 
-AND id.IDENTITY_TYPE_ID = '0';
+AND id.IDENTITY_TYPE_ID = '0'
+
+;
 GO
 
 

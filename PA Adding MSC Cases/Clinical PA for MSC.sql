@@ -5,8 +5,14 @@ GO
 SET QUOTED_IDENTIFIER ON
 GO
 
-CREATE VIEW [Mart_Load_UWHealth].[VIZIENT_PROC_ANALYTICS_CLN_UW]
-AS SELECT DISTINCT
+CREATE VIEW [Mart_Load_UWHealth].[VIZIENT_PROC_ANALYTICS_CLN_UW] AS 
+SELECT 
+/*
+5-13-25 Matt Rock - added another union to select MSC cases. Those cases did not have entries in [source_uwhealth].epic_hsp_account_cur, so 
+they were almost entirely not included. The work around was to get to Strata data via 
+[source_uwhealth].epic_pat_or_adm_link_cur.or_link_csn = [Mart_UWHealth].STRATA_COST_CHARGE_ACTIVITY_PB.pat_enc_csn_id
+*/
+DISTINCT
 '520098' as "Medicare Provider ID"
 ,COALESCE(CAST(har.LOC_ID as varchar(18)), '') as "Sub-Facility ID"
 ,'40357' as "Member ID"
@@ -927,7 +933,7 @@ END as "CANCELLATION FLAG"
 
 -- OR Mgmt System case/log records
 FROM [source_uwhealth].epic_or_case_cur orc
-LEFT OUTER JOIN [source_uwhealth].epic_or_log_cur orlog ON orc.LOG_ID = orlog.LOG_ID
+LEFT OUTER JOIN [source_uwhealth].epic_or_log_cur orlog ON orc.LOG_ID = orlog.LOG_ID 
 LEFT OUTER JOIN [source_uwhealth].epic_f_log_based_cur flb ON orlog.LOG_ID = flb.LOG_ID-- available in Clarity 2015 forward
 LEFT OUTER JOIN [source_uwhealth].epic_ZC_OR_CASE_CLASS_CUR zocc ON orc.CASE_CLASS_C = zocc.CASE_CLASS_C-- BJ: 08/10/18
 
@@ -1449,7 +1455,7 @@ END as "CANCELLATION FLAG"
 
 -- OR Mgmt System case/log records
 FROM [source_uwhealth].epic_or_case_cur orc
-LEFT OUTER JOIN [source_uwhealth].epic_or_log_cur orlog ON orc.LOG_ID = orlog.LOG_ID
+LEFT OUTER JOIN [source_uwhealth].epic_or_log_cur orlog ON orc.LOG_ID = orlog.LOG_ID 
 LEFT OUTER JOIN [source_uwhealth].epic_f_log_based_cur flb ON orlog.LOG_ID = flb.LOG_ID-- available in Clarity 2015 forward
 LEFT OUTER JOIN [source_uwhealth].epic_ZC_OR_CASE_CLASS_CUR zocc ON orc.CASE_CLASS_C = zocc.CASE_CLASS_C-- BJ: 08/10/18
 
@@ -1586,7 +1592,214 @@ AND id.IDENTITY_TYPE_ID = '0'
 AND har.SERV_AREA_ID IN ('10000')
 AND orlog.LOC_ID NOT IN ('88600','99600') --OOR cases at UWH-Madison
 AND orlog.ROOM_ID NOT IN ('692742','692743','692744','692745','692746','692747','692748','692749','692875','692876','692877','693301','693326','695241','695382','695383') --APC rooms to be excluded because many noninvasive procedures and others that are causing data quality concerns
-AND orlog.ROOM_ID NOT IN ('693288','695076');
-GO
+AND orlog.ROOM_ID NOT IN ('693288','695076')
 
+UNION
+/*This section is for MSC surgeries only. */
+
+SELECT
+'520098' as "Medicare Provider ID"
+,COALESCE(CAST(stratacpts.place_of_service_id as varchar(18)), '') as "Sub-Facility ID"
+,'40357' as "Member ID"
+,COALESCE(CAST(coalesce(peh.HSP_ACCOUNT_ID, stratacpts.pat_enc_csn_id)  as varchar(18)), '') as "Encounter ID" --stratacpts.pat_enc_csn_id
+,COALESCE(CAST(id.IDENTITY_ID as varchar(25)), '') as "Patient ID"
+,COALESCE(orlog.CASE_ID, '') as "PROCEDURAL CASE NUMBER"
+,COALESCE(CAST(CONVERT(nchar(8), orlog.SURGERY_DATE,112) as varchar(112)),'') AS "Date of Service"
+,COALESCE(CAST(CONVERT(nchar(8), patient.BIRTH_DATE,112) as varchar(112)),'') AS "Date of Birth"
+,flb.DEPARTMENT_ID as "HCO DEPARTMENT CODE"
+,cd2.DEPARTMENT_NAME as "HCO DEPARTMENT DESCRIPTION"
+,CASE WHEN patient.SEX_C = '1' THEN '2'
+ WHEN patient.SEX_C = '2' THEN '1'
+ ELSE '3'
+END as "SEX"
+/*,COALESCE(zoor.TITLE, '') as "PROCEDURE LOCATION"-- BJ: 08/10/18 */
+,'' as "PROCEDURE LOCATION"
+,COALESCE(zocc.TITLE, '') as "CASE STATUS"-- BJ: 08/10/18
+
+/* BEGIN "Client to Verify" Selection - compare mapped values below in table ZC_ACCT_CLASS_HA to values below, update as needed!!!!!
+ F is 'Freestanding Ambulatory Surgery' per Vizient mapping
+ */
+,'F' as "ENCOUNTER TYPE" 
+/* END "Client to Verify Selection"
+
+ BEGIN "Client to Verify Selection" - Case Type (coding to be modified/replaced per client)
+UW Health is hardcoding this field because all of the data will be flowing through clarity for now and the operating room is the only procedural area using clarity
+OR' AS "CASE TYPE" --used to do until 6/14 for uwh-madison */
+,CASE WHEN ser_room.PROV_NAME like '%UWHC OSC%' THEN 'HA'-- Hospital based ambulatory surgery
+WHEN orlog.ROOM_ID IN ('692083','692084','693343','695239') THEN 'HS'-- Hybrid Suite
+Else 'OR'
+END AS "CASE TYPE"
+,'' as "ROBOTICS FLAG"  
+,COALESCE(CAST(orlog.ASA_RATING_C as varchar(2)), '') as "ASA PHYSICAL STATUS CLASSIFICATION"
+,COALESCE(stratacpts.BILLED_CPT_CODE, '') as "CPT Procedure Code"-- BJ: 09/28/18 --KCJ 11/14/18 removed orproccpt.OR_PROC_ID from coalesce because UW Health does not populate that table
+,COALESCE(stratacpts.PROF_ATTR_PROVIDER_ID, serlog.PROV_ID, '') as "CPT HOSPITAL-ASSIGNED PHYSICIAN ID" -- BJ: 08/07/18 & 09/28/18
+,COALESCE(CAST(stratacpts.CPT_MODIFIER_ONE as varchar(2)), '') as "CPT CODE MODIFIER_1" 
+,COALESCE(CAST(stratacpts.CPT_MODIFIER_TWO as varchar(2)), '') as "CPT CODE MODIFIER_2"         
+,COALESCE(CAST(stratacpts.CPT_MODIFIER_THREE as varchar(2)), '') as "CPT CODE MODIFIER_3"         
+,COALESCE(CAST(stratacpts.CPT_MODIFIER_FOUR as varchar(2)), '') as "CPT CODE MODIFIER_4"        
+,'' as "ICD-10 PROCEDURE CODE"
+,'' as "ICD-10 PROCEDURE SEQUENCE"
+,'' as "ICD-10 HOSPITAL-ASSIGNED PHYSICIAN ID"
+,'' as "HCO PROCEDURE CODE"
+,'' as "HCO PROCEDURE DESCRIPTION"
+,NULL as "HCO PROCEDURE SEQUENCE"
+,'' as "HCO PROCEDURE HOSPITAL-ASSIGNED PHYSICIAN ID"
+,'' as "SCHEDULED PROCEDURAL SUITE"
+--,COALESCE(CAST(orlog.ROOM_ID as varchar(18)), '') as "ACTUAL PROCEDURAL SUITE"  -- BJ: 08/05/18
+,COALESCE(CAST(ser_room.PROV_NAME as varchar(30)), '') as "ACTUAL PROCEDURAL SUITE" -- BJ: 08/05/15
+,COALESCE(CAST(respanes.PROV_ID as varchar(18)), '') as "ANESTHESIOLOGIST PHYSICIAN ID - 1"
+,'' as "ANESTHESIOLOGIST PHYSICIAN ID - 2"
+,'' as "ANESTHESIOLOGIST PHYSICIAN ID - 3" 
+,'' as "ANESTHESIOLOGIST PHYSICIAN ID - 4"
+,COALESCE(CAST(primcirc.PROV_ID as varchar(18)), '') as "CIRCULATOR ID - 1"
+,'' as "CIRCULATOR ID - 2"
+,'' as "CIRCULATOR ID - 3"
+,'' as "CIRCULATOR ID - 4" 
+,COALESCE(primcirc.PROV_NM_CRED, '') as "CIRCULATOR NAME - 1"
+,'' as "CIRCULATOR NAME - 2"
+,'' as "CIRCULATOR NAME - 3"
+,'' as "CIRCULATOR NAME - 4"
+,COALESCE(CAST(primsurgtech.PROV_ID as varchar(18)), '') as "SCRUB TECH ID - 1"
+,'' as "SCRUB TECH ID - 2"
+,'' as "SCRUB TECH ID - 3"
+,'' as "SCRUB TECH ID - 4"
+,COALESCE(primsurgtech.PROV_NM_CRED, '') as "SCRUB TECH NAME - 1"
+,'' as "SCRUB TECH NAME - 2"
+,'' as "SCRUB TECH NAME - 3"
+,'' as "SCRUB TECH NAME - 4"
+,'' as "SURGICAL ASSISTANT ID - 1"
+,'' as "SURGICAL ASSISTANT ID - 2"
+,'' as "SURGICAL ASSISTANT ID - 3"
+,'' as "SURGICAL ASSISTANT ID - 4" 
+,'' as "SURGICAL ASSISTANT NAME - 1"
+,'' as "SURGICAL ASSISTANT NAME - 2"
+,'' as "SURGICAL ASSISTANT NAME - 3"
+,'' as "SURGICAL ASSISTANT NAME - 4"
+
+, FORMAT(orlog.SCHED_START_TIME,'yyyyMMddHHmm') as "DATE CASE SCHEDULED"
+,CASE WHEN orc.CANCEL_REASON_C IS NOT NULL AND orc.CANCEL_COMMENTS IS NOT NULL AND ot.Incision_Start IS NULL AND ot.Incision_Close IS NULL
+  THEN 'Y'
+  WHEN orc.CANCEL_REASON_C IS NOT NULL AND orc.CANCEL_COMMENTS IS NULL AND ot.Incision_Start IS NULL AND ot.Incision_Close IS NULL
+  THEN 'Y'
+  WHEN orc.CANCEL_COMMENTS IS NOT NULL AND orc.CANCEL_REASON_C IS NULL AND ot.Incision_Start IS NULL AND ot.Incision_Close IS NULL
+  THEN 'Y'
+  ELSE 'N'
+END as "CANCELLATION FLAG"
+, FORMAT(orlog.SCHED_START_TIME,'yyyyMMddHHmm') as "SCHEDULED CASE START"
+,'' as "SCHEDULED CASE END"
+, FORMAT(ot.In_Room,'yyyyMMddHHmm') AS "PATIENT IN ROOM"
+, FORMAT(ot.Anesthesia_Start,'yyyyMMddHHmm') AS "ANESTHESIA START"
+,FORMAT(ot.Incision_Start,'yyyyMMddHHmm') AS "INCISION START"
+, FORMAT(ot.Incision_Close,'yyyyMMddHHmm') AS "INCISION CLOSE"
+, FORMAT(ot.Anesthesia_End,'yyyyMMddHHmm') AS "ANESTHESIA END"
+, FORMAT(ot.Out_of_Room,'yyyyMMddHHmm') AS "PATIENT OUT OF ROOM"
+, FORMAT(ot.In_Recovery,'yyyyMMddHHmm') AS "RECOVERY START"
+, FORMAT(ot.Out_Recovery,'yyyyMMddHHmm') AS "RECOVERY END"
+, FORMAT(olat2.PostDate,'yyyyMMddHHmm') AS "POST DATE"
+FROM [source_uwhealth].epic_or_case_cur orc
+LEFT OUTER JOIN [source_uwhealth].epic_or_log_cur orlog ON orc.LOG_ID = orlog.LOG_ID 
+LEFT OUTER JOIN [source_uwhealth].epic_f_log_based_cur flb ON orlog.LOG_ID = flb.LOG_ID-- available in Clarity 2015 forward
+LEFT OUTER JOIN [source_uwhealth].epic_ZC_OR_CASE_CLASS_CUR zocc ON orc.CASE_CLASS_C = zocc.CASE_CLASS_C-- BJ: 08/10/18
+
+-- Patient info
+INNER JOIN [source_uwhealth].epic_pat_or_adm_link_cur PAT_OR_ADM_LINK ON orlog.CASE_ID = PAT_OR_ADM_LINK.CASE_ID
+INNER JOIN [source_uwhealth].epic_pat_enc_hsp_cur peh ON PAT_OR_ADM_LINK.OR_LINK_CSN = peh.PAT_ENC_CSN_ID
+INNER JOIN [source_uwhealth].epic_PATIENT_cur patient ON orlog.PAT_ID = patient.PAT_ID
+
+INNER JOIN [source_uwhealth].epic_IDENTITY_ID_cur id ON patient.PAT_ID = id.PAT_ID
+
+-- Procedure Scheduled/Ordered Info
+LEFT OUTER JOIN [source_uwhealth].epic_or_case_ALL_PROC_cur orcap ON orc.OR_CASE_ID = orcap.OR_CASE_ID -- BJ: 9/10/18
+LEFT OUTER JOIN [source_uwhealth].epic_OR_PROC_cur orproc ON orcap.OR_PROC_ID = orproc.OR_PROC_ID
+--LEFT OUTER JOIN ZC_OR_OP_REGION zoor ON orproc.OPERATING_REGION_C = zoor.OPERATING_REGION_C-- BJ: 08/10/18
+-- Reflecting CASE Documentation: OR_PROC_CPT_ID varies by Member (1) not populated, (2) CPT mapped 1 PROC_ID to many CPTs to hopefully (3) CPT mapped to 1 PROC_ID
+--LEFT OUTER JOIN OR_PROC_CPT_ID orproccpt ON orproc.OR_PROC_ID = orproccpt.OR_PROC_ID
+LEFT OUTER JOIN [source_uwhealth].epic_ZC_OR_CANCEL_RSN_cur orcrsn ON orc.CANCEL_REASON_C = orcrsn.CANCEL_REASON_C
+LEFT OUTER JOIN [source_uwhealth].epic_ZC_PROC_NOT_PERF_cur zcprocnotperf ON orlog.PROC_NOT_PERF_C = zcprocnotperf.PROC_NOT_PERF_C
+
+-- Performing Physician Info (not captured in F_LOG_BASED table)
+LEFT JOIN [source_uwhealth].epic_or_log_ALL_STAFF_cur orlas on orlas.LOG_ID = orlog.LOG_ID and orlas.STAFF_TYPE_MAP_C = 1 and orlas.ROLE_C = 1 and orlas.PANEL = 1 -- and orlas.ACCOUNTBLE_STAFF_YN = 'Y'
+LEFT JOIN [source_uwhealth].epic_CLARITY_SER_cur serlog on serlog.PROV_ID = orlas.STAFF_ID
+    
+-- Staff Name and Credentials
+LEFT OUTER JOIN [source_uwhealth].epic_D_PROV_PRIMARY_HIERARCHY_cur performphys on serlog.PROV_ID = performphys.PROV_ID--performing physician
+LEFT OUTER JOIN [source_uwhealth].epic_D_PROV_PRIMARY_HIERARCHY_cur primphys on flb.PRIMARY_PHYSICIAN_ID = primphys.PROV_ID--primary physician
+LEFT OUTER JOIN [source_uwhealth].epic_D_PROV_PRIMARY_HIERARCHY_cur secondphys on flb.SECONDARY_PHYSICIAN_ID = secondphys.PROV_ID--secondary physician
+LEFT OUTER JOIN [source_uwhealth].epic_D_PROV_PRIMARY_HIERARCHY_cur primcirc on flb.PRIMARY_CIRCULATOR_ID = primcirc.PROV_ID--primary circulator
+LEFT OUTER JOIN [source_uwhealth].epic_D_PROV_PRIMARY_HIERARCHY_cur primsurgtech on flb.PRIMARY_SURG_TECH_ID = primsurgtech.PROV_ID--primary surgical technician
+LEFT OUTER JOIN [source_uwhealth].epic_D_PROV_PRIMARY_HIERARCHY_cur primprern on flb.PRIMARY_PREOP_NURSE_ID = primprern.PROV_ID--primary preop nurse
+LEFT OUTER JOIN [source_uwhealth].epic_D_PROV_PRIMARY_HIERARCHY_cur primrecrn on flb.PRIMARY_RECOVERY_NURSE_ID = primrecrn.PROV_ID--primary recovery nurse
+LEFT OUTER JOIN [source_uwhealth].epic_D_PROV_PRIMARY_HIERARCHY_cur primphaseiirn on flb.PRIMARY_PHASEII_NURSE_ID = primphaseiirn.PROV_ID--primary phase II nurse
+LEFT OUTER JOIN [source_uwhealth].epic_D_PROV_PRIMARY_HIERARCHY_cur respanes on flb.RESP_ANES_ID = respanes.PROV_ID--responsible anesthesia provider
+LEFT OUTER JOIN [source_uwhealth].epic_D_PROV_PRIMARY_HIERARCHY_cur firstanes on flb.FIRST_ANES_ID = firstanes.PROV_ID--first anesthesia provider
+
+
+-- Exclude test paitients in WHERE clause
+LEFT OUTER JOIN [source_uwhealth].epic_PATIENT_3_cur pat3 ON patient.PAT_ID = pat3.PAT_ID
+
+-- OR Room Info
+LEFT OUTER JOIN [source_uwhealth].epic_CLARITY_SER_cur ser_room ON orlog.ROOM_ID = ser_room.PROV_ID
+LEFT OUTER JOIN [source_uwhealth].epic_CLARITY_LOC_cur loc on orlog.LOC_ID = loc.LOC_ID and loc.loc_id = '34100' --MSC
+ 
+--Department
+LEFT OUTER JOIN [source_uwhealth].epic_CLARITY_DEP_cur cd2 ON flb.DEPARTMENT_ID = cd2.DEPARTMENT_ID
+
+
+LEFT OUTER JOIN (SELECT ct.LOG_ID
+,MAX(ct.PATIENT_IN_ROOM_DTTM) AS In_Room
+,MAX(ct.ANESTHESIA_START_DTTM) AS Anesthesia_Start
+,MAX(ct.PROCEDURE_START_DTTM) AS Incision_Start -- kcj added 5/22 per definition in clarity dictionary
+,MAX(ct.PROCEDURE_COMP_DTTM) AS Incision_Close -- kcj added 5/22 per definition in clarity dictionary
+--,MAX(CASE WHEN ptime.PANEL_TIME_EVENT_C = '144' THEN ptime.panel_start_time END) AS Incision_Start -- kcj removed 5/22 due to time field not being populated in clarity and alternative above meets definition criteria
+--,MAX(CASE WHEN ptime.PANEL_TIME_EVENT_C = '288' THEN ptime.panel_start_time END) AS Incision_Close -- kcj removed 5/22 due to time field not being populated in clarity and alternative above meets definition criteria
+,MAX(ct.ANESTHESIA_STOP_DTTM) AS Anesthesia_End
+,MAX(ct.PATIENT_OUT_ROOM_DTTM) AS Out_of_Room
+,MAX(ct.PATIENT_IN_RECOVERY_DTTM) AS In_Recovery
+,MAX(ct.PATIENT_OUT_RECOVERY_DTTM) AS Out_Recovery
+FROM [source_uwhealth].epic_V_LOG_TIMING_EVENTS_cur ct
+LEFT OUTER JOIN [source_uwhealth].epic_OR_LOG_PANEL_TIME1_cur ptime ON ct.log_id = ptime.log_id
+GROUP BY ct.LOG_ID
+) ot ON orlog.LOG_ID = ot.LOG_ID
+
+-- Determine Most Recent "PostDate" and use/share globally in script
+LEFT OUTER JOIN (SELECT olat.LOG_ID, MAX(olat.AUDIT_DATE) OVER(PARTITION BY olat.LOG_ID ORDER BY olat.LOG_ID, olat.AUDIT_DATE desc) AS PostDate
+ FROM [source_uwhealth].epic_or_log_AUDIT_TRAIL_cur olat 
+ WHERE olat.AUDIT_ACTION_C = '7'
+) olat2 ON orlog.LOG_ID = olat2.LOG_ID
+-- Billing CPTs
+join [Mart_UWHealth].STRATA_COST_CHARGE_ACTIVITY_PB stratacpts on PAT_OR_ADM_LINK.or_link_csn = stratacpts.pat_enc_csn_id
+	and stratacpts.entity_cd = '413' /* entity for MSC only */ 
+
+WHERE
+-- Dates passed from @Variables above set based upon request (On-Boarding, Baseline/Historical or Ongoing Refreshes)
+
+-- Opt1 OnBoarding, Baseline/Historical or Ongoing Refresh (***** Monthly *****) Logic
+
+--CONVERT(varchar,orlog.SURGERY_DATE,112) >= @StartDate AND CONVERT(varchar,orlog.SURGERY_DATE,112) < DATEADD(DAY, 1, @EndDate)
+--orlog.SURGERY_DATE >= '7/1/2021' AND orlog.SURGERY_DATE < '8/1/2021' COmmenting 06/04/2024
+-- Opt2 Ongoing Refresh (***** Daily *****) Logic
+
+-- CONVERT(varchar,orlog.SURGERY_DATE,112) = CONVERT(varchar,GETDATE()-1,112)
+
+-- Exclude 'test' patients in production database
+--AND 
+(pat3.IS_TEST_PAT_YN IS NULL OR pat3.IS_TEST_PAT_YN = 'N')
+AND patient.PAT_MRN_ID NOT LIKE 'ZZ%'
+
+-- Selection of Patient Types for "Non-Inpatient"
+--AND har.ACCT_CLASS_HA_C NOT IN ('2','6','8') 
+AND id.IDENTITY_TYPE_ID = '0'
+
+--AND orproc.OR_PROC_ID is not null
+
+-- BEGIN Facility Selection--default is all
+--AND har.SERV_AREA_ID IN ('10000')
+AND orlog.LOC_ID NOT IN ('88600','99600') --OOR cases at UWH-Madison
+AND orlog.ROOM_ID NOT IN ('692742','692743','692744','692745','692746','692747','692748','692749','692875','692876','692877','693301','693326','695241','695382','695383') --APC rooms to be excluded because many noninvasive procedures and others that are causing data quality concerns
+AND orlog.ROOM_ID NOT IN ('693288','695076') -- RN Out rooms that are often non-invasive procedures
+--AND har.LOC_ID IN ('37000')
+--AND (flb.DEPARTMENT_ID LIKE '3%' OR cd2.DEPARTMENT_NAME LIKE '%TAC%' OR ser_room.PROV_NAME LIKE '%TAC%')
+--(SELECT LOC_ID FROM CLARITY_LOC
+--WHERE LOCATION_ABBR like '%PVH%')
+-- END Facility Selection
 
