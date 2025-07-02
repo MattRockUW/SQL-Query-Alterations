@@ -27,7 +27,7 @@ JOIN [source_uwhealth].epic_f_log_based_cur flb ON orlog.LOG_ID = flb.LOG_ID AND
 --LEFT OUTER JOIN [source_uwhealth].epic_ZC_OR_CASE_CLASS_CUR zocc ON orc.CASE_CLASS_C = zocc.CASE_CLASS_C
 
 JOIN  [source_uwhealth].epic_pat_or_adm_link_cur PAT_OR_ADM_LINK ON orlog.CASE_ID = PAT_OR_ADM_LINK.CASE_ID
-JOIN [source_uwhealth].epic_pat_enc_hsp_cur peh ON PAT_OR_ADM_LINK.OR_LINK_CSN = peh.PAT_ENC_CSN_ID and peh.pat_enc_csn_id in 
+JOIN [source_uwhealth].epic_pat_enc_hsp_cur peh ON PAT_OR_ADM_LINK.OR_LINK_CSN = peh.PAT_ENC_CSN_ID and peh.pat_enc_csn_id 
 
 LEFT OUTER JOIN [source_uwhealth].epic_PATIENT_cur patient ON orlog.PAT_ID = patient.PAT_ID
 JOIN [source_uwhealth].epic_HSP_ACCOUNT_cur har ON peh.HSP_ACCOUNT_ID = har.HSP_ACCOUNT_ID
@@ -91,13 +91,4 @@ select  * From [source_uwhealth].epic_pat_or_adm_link_cur PAT_OR_ADM_LINK
 where or_link_csn in (select pat_enc_csn_id from [Mart_UWHealth].[STRATA_COST_ACCOUNT_PB]
 	where admit_dt between '2025-03-01' and '2025-03-31'
 and place_of_service_id = '34100')
-
-
-select  * From [source_uwhealth].epic_pat_or_adm_link_cur PAT_OR_ADM_LINK where or_link_csn = '476221250' and pat_id = 'Z906941'
-
-select * from [Mart_UWHealth].[STRATA_COST_ACCOUNT_PB]
-where pat_enc_csn_id = '476221250'
-
-select * from [Mart_UWHealth].STRATA_COST_CHARGE_ACTIVITY_PB
-where pat_enc_csn_id = '476221250'
 
